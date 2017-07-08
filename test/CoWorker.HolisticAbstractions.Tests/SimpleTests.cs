@@ -1,55 +1,42 @@
+using System.Linq;
+using Newtonsoft.Json;
 using Microsoft.Extensions.DependencyInjection;
 using System;
-using System.Threading.Tasks;
 using Xunit;
+using System.IO;
 
 namespace CoWorker.HolisticAbstractions.Tests
 {
     public class SimpleTests
     {
-        private static IServiceProvider Service => new ServiceCollection()
-               .AddCommandDispatcher()
-               .AddHandler<Command, AssertCommandHandler>()
-               .AddHandler<AlwaysTrueCommand, AssertCommandHandler>()
-               .BuildServiceProvider();
+        private static IServiceProvider Service
+            => new ServiceCollection().AddHandler<object, IWriteTo<object>, OutputWithString<object>>()
+                        .AddHandler<object, IWriteTo<object>, OutputWithJson<object>>()
+                        .AddHandlerDecorator<object, IDoManyTimes<object>, Twice<object>>()
+                        .AddHandlerDecorator<object, IDoManyTimes<object>, ThreeTimes<object>>()
+
+                .AddSingleton<TextWriter>(new ActualWriter())
+                .BuildServiceProvider();
+        public static SeedDTO Seed => new SeedDTO()
+        {
+            Now = OneTime,
+            Word = OneTime.ToString(),
+            Number = OneTime.UtcTicks
+        };
+        public readonly static DateTimeOffset OneTime = new DateTimeOffset(new DateTime(2017, 02, 03, 05, 06, 07));
         [Fact]
-        public void test_direct_command_and_handler()
+        public void test_IWriteToCommandHandler()
         {
-            Service.GetService<ITaskProcessor<Command>>().Send(new Command(() => 1 == 1));
+            var service = Service;
+            service.GetService<IDoManyTimes<SeedDTO>>().Invoke(Seed);
+            var writer = service.GetService<TextWriter>();
+            Assert.IsType<ActualWriter>(writer);
+            ActualWriter actual = writer as ActualWriter;
+            var str = actual.Actual;
+            Assert.NotEmpty(str);
+            Assert.Equal(Expect, str);
         }
-        [Fact]
-        public void test_inherint_command_and_handler()
-        {
-            Service.GetService<ITaskProcessor<AlwaysTrueCommand>>().Send(new AlwaysTrueCommand());
-        }
-    }
 
-    public class Command
-    {
-        private Func<bool> assert;
-        public Command(Func<bool> assert)
-        {
-            this.assert = assert;
-        }
-        public virtual void TryAssert(Action<Func<bool>> callback)
-        {
-            callback(assert);
-        }
-    }
-
-    public class AlwaysTrueCommand : Command
-    {
-        public AlwaysTrueCommand() : base(() => true)
-        {
-        }
-    }
-
-    public class AssertCommandHandler : ICommandHandler<Command>
-    {
-        public Task InvokeAsync(Command command)
-        {
-            command.TryAssert(x => Assert.True(x()));
-            return Task.CompletedTask;
-        }
+        public static string Expect = string.Join(string.Empty,Enumerable.Repeat(JsonConvert.SerializeObject(Seed) + "\r\n",3));
     }
 }
